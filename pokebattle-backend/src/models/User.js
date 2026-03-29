@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const UserSchema = new mongoose.Schema({
     username: {
@@ -29,10 +30,22 @@ const UserSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    createdAt: {
+    createdAt: {// Fecha de creación del usuario
         type: Date,
         default: Date.now
     }
+});
+
+// Este código se ejecuta JUSTO ANTES de guardar el usuario en la base de datos
+UserSchema.pre('save', async function() {
+    // Si la contraseña no ha sido cambiada, saltamos este paso
+    if (!this.isModified('password')) return;
+    
+    // Generamos una "salt" (un código aleatorio para complicar el hackeo)
+    const salt = await bcrypt.genSalt(10);
+    // Encriptamos la contraseña
+    this.password = await bcrypt.hash(this.password, salt);
+
 });
 
 module.exports = mongoose.model('User', UserSchema);

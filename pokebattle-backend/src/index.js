@@ -11,7 +11,7 @@ const app = express();
 app.use(express.json()); // Permite que el servidor entienda datos en formato JSON
 app.use(cors()); // Permite que tu Web y tu App móvil hagan peticiones
 
-// 4. Ruta de prueba (Endpoint básico para ver si funciona)
+// 4. Ruta de prueba
 app.get('/', (req, res) => {
     res.send('¡El motor de PokeBattle está funcionando perfectamente!');
 });
