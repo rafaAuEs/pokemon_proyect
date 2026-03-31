@@ -20,12 +20,15 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 
-// Importamos las rutas de usuario y las usamos con el prefijo /api/users
+// Importamos las rutas
 const userRoutes = require('./routes/userRoutes');
 const pokemonRoutes = require('./routes/pokemonRoutes');
+const battleRoutes = require('./routes/battleRoutes');
 
+// Usamos las rutas
 app.use('/api/users', userRoutes);
 app.use('/api/pokemon', pokemonRoutes);
+app.use('/api/battle', battleRoutes);
 
 app.get('/api/health', (req, res) => {
     res.json({ ok: true, service: 'pokebattle-backend' });
