@@ -22,9 +22,10 @@ const MONGO_URI = process.env.MONGO_URI;
 
 // Importamos las rutas de usuario y las usamos con el prefijo /api/users
 const userRoutes = require('./routes/userRoutes');
+const pokemonRoutes = require('./routes/pokemonRoutes');
+
 app.use('/api/users', userRoutes);
-// Alias opcional por si se usa el prefijo singular por error.
-app.use('/api/user', userRoutes);
+app.use('/api/pokemon', pokemonRoutes);
 
 app.get('/api/health', (req, res) => {
     res.json({ ok: true, service: 'pokebattle-backend' });
