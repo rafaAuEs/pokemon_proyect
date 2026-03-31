@@ -54,25 +54,32 @@ exports.addPokemonToTeam = async (req, res) => {
     try {
         // Recibimos el ID del usuario y el nombre del Pokémon desde la petición
         const { userId, pokemonName } = req.body;
+        const nameLower = pokemonName.toLowerCase();
 
-        // 1. Buscamos al usuario en la base de datos
+        // 1. VALIDAMOS si existe el Pokémon
+        const pokeCheck = await fetch(`https://pokeapi.co/api/v2/pokemon/${nameLower}`);
+        if (!pokeCheck.ok) {
+            return res.status(404).json({ message: "Ese Pokémon no existe. ¡No puedes añadir un invento!" });
+        }
+
+        // 2. Buscamos al usuario en la base de datos
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ message: "Entrenador no encontrado" });
         }
 
-        // 2. Comprobamos que el equipo no esté lleno (máximo 6 Pokémon)
+        // 3. Comprobamos que el equipo no esté lleno (máximo 6 Pokémon)
         if (user.pokemonTeam.length >= 6) {
             return res.status(400).json({ message: "¡Tu equipo ya tiene 6 Pokémon! Debes liberar uno primero." });
         }
 
-        // 3. Comprobamos que no tenga ya a ese Pokémon en el equipo (opcional, pero recomendado)
+        // 4. Comprobamos que no tenga ya a ese Pokémon en el equipo
         if (user.pokemonTeam.includes(pokemonName.toLowerCase())) {
             return res.status(400).json({ message: "¡Ya tienes a este Pokémon en tu equipo!" });
         }
 
-        // 4. Añadimos el Pokémon al array y guardamos
-        user.pokemonTeam.push(pokemonName.toLowerCase());
+        // 5. Añadimos el Pokémon al array y guardamos
+        user.pokemonTeam.push(nameLower);
         await user.save();
 
         res.status(200).json({ 
