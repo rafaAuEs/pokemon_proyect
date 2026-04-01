@@ -1,3 +1,5 @@
+"use strict";
+
 const User = require('../models/User');
 
 exports.registerUser = async (req, res) => {

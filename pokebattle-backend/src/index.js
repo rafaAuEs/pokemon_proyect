@@ -1,3 +1,5 @@
+"use strict";
+
 // 1. Importar las dependencias (Librerías)
 const express = require('express');
 const mongoose = require('mongoose');

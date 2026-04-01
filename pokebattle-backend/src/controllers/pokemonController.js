@@ -1,3 +1,5 @@
+"use strict";
+
 exports.getPokemon = async (req, res) => {
     try {
         // Cogemos el nombre del Pokémon que el usuario ponga en la URL
