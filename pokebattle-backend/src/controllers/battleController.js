@@ -52,96 +52,60 @@ exports.startBattle = async (req, res) => {
 
 exports.simulateAttack = async (req, res) => {
     try {
-        // 1. Recibimos el ID del combate, quién ataca y con qué movimiento
-        const { battleId, actor, moveName } = req.body;
+        // 1. Recibimos los datos del ataque
+        const { battleId, moveName } = req.body;
 
-        // 2. Buscamos el estado actual del combate en la base de datos
         const battle = await Battle.findById(battleId);
         if (!battle) return res.status(404).json({ message: "Combate no encontrado" });
+        if (battle.status !== 'ongoing') return res.status(400).json({ message: `Combate terminado. Resultado: ${battle.status}` });
 
-        // Si el combate ya terminó antes, no dejamos atacar
-        if (battle.status !== 'ongoing') {
-            return res.status(400).json({ message: `El combate ya ha terminado. Resultado: ${battle.status}` });
-        }
-
-        // 3. Determinamos quién ataca y quién defiende en este turno
-        let attackerRecord, defenderRecord;
-        if (actor === 'player') {
-            attackerRecord = battle.playerPokemon;
-            defenderRecord = battle.enemyPokemon;
-        } else if (actor === 'enemy') {
-            attackerRecord = battle.enemyPokemon;
-            defenderRecord = battle.playerPokemon;
-        } else {
-            return res.status(400).json({ message: "El 'actor' debe ser 'player' o 'enemy'" });
-        }
-
-        // 4. Buscamos los datos en la PokeAPI (Stats y Movimiento)
+        // --- TURNO DEL JUGADOR ---
         const [attackerRes, defenderRes, moveRes] = await Promise.all([
-            fetch(`https://pokeapi.co/api/v2/pokemon/${attackerRecord.name}`),
-            fetch(`https://pokeapi.co/api/v2/pokemon/${defenderRecord.name}`),
-            fetch(`https://pokeapi.co/api/v2/move/${moveName.replace(/\s+/g, '-').toLowerCase()}`)
+            fetch(`https://pokeapi.co/api/v2/pokemon/${battle.playerPokemon.name}`),
+            fetch(`https://pokeapi.co/api/v2/pokemon/${battle.enemyPokemon.name}`),
+            fetch(`https://pokeapi.co/api/v2/move/${moveName.toLowerCase()}`)
         ]);
-
-        if (!attackerRes.ok || !defenderRes.ok || !moveRes.ok) {
-            return res.status(400).json({ message: "Error al buscar datos en la PokeAPI. Revisa los nombres." });
-        }
 
         const attacker = await attackerRes.json();
         const defender = await defenderRes.json();
         const move = await moveRes.json();
 
-        // --- CÁLCULO DE DAÑO ---
-        const attackStat = attacker.stats.find(s => s.stat.name === 'attack').base_stat;
-        const defenseStat = defender.stats.find(s => s.stat.name === 'defense').base_stat;
-        const moveType = move.type.name;
-        const defenderTypes = defender.types.map(t => t.type.name);
-
-        const typeRes = await fetch(`https://pokeapi.co/api/v2/type/${moveType}`);
-        const typeData = await typeRes.json();
-
-        let typeMultiplier = 1;
-        const doubleDamageTo = typeData.damage_relations.double_damage_to.map(t => t.name);
-        const halfDamageTo = typeData.damage_relations.half_damage_to.map(t => t.name);
-        const noDamageTo = typeData.damage_relations.no_damage_to.map(t => t.name);
-
-        defenderTypes.forEach(defType => {
-            if (doubleDamageTo.includes(defType)) typeMultiplier *= 2;
-            if (halfDamageTo.includes(defType)) typeMultiplier *= 0.5;
-            if (noDamageTo.includes(defType)) typeMultiplier *= 0;
-        });
-
-        let stabMultiplier = 1;
-        if (attacker.types.map(t => t.type.name).includes(moveType)) stabMultiplier = 1.5;
-
-        const level = 50;
-        const movePower = move.power || 50;
+        // Cálculo de daño del jugador
+        const playerAtk = attacker.stats.find(s => s.stat.name === 'attack').base_stat;
+        const enemyDef = defender.stats.find(s => s.stat.name === 'defense').base_stat;
+        const playerDamage = Math.floor((((22) * (move.power || 50) * (playerAtk / enemyDef)) / 50) + 2); // Fórmula simplificada
         
-        let baseDamage = Math.floor((((2 * level / 5 + 2) * movePower * (attackStat / defenseStat)) / 50) + 2);
-        let finalDamage = Math.floor(baseDamage * typeMultiplier * stabMultiplier);
-        // --- FIN DEL CÁLCULO ---
+        battle.enemyPokemon.currentHp -= playerDamage;
+        if (battle.enemyPokemon.currentHp <= 0) battle.enemyPokemon.currentHp = 0;
 
-        // 5. APLICAMOS EL DAÑO A LA BASE DE DATOS
-        defenderRecord.currentHp -= finalDamage;
+        let battleLog = [`¡Tu ${battle.playerPokemon.name.toUpperCase()} usa ${moveName.toUpperCase()} y hace ${playerDamage} de daño!`];
 
-        // Evitamos que la vida baje de 0
-        if (defenderRecord.currentHp <= 0) {
-            defenderRecord.currentHp = 0;
-            // Si la vida llega a 0, el combate termina
-            battle.status = actor === 'player' ? 'won' : 'lost';
+        // --- TURNO DEL ENEMIGO (LA IA) ---
+        if (battle.enemyPokemon.currentHp > 0) {
+            // Buscamos un movimiento básico para el enemigo (Tackle)
+            const enemyMoveRes = await fetch(`https://pokeapi.co/api/v2/move/tackle`);
+            const enemyMove = await enemyMoveRes.json();
+
+            const enemyAtk = defender.stats.find(s => s.stat.name === 'attack').base_stat;
+            const playerDef = attacker.stats.find(s => s.stat.name === 'defense').base_stat;
+            const enemyDamage = Math.floor((((22) * (enemyMove.power || 40) * (enemyAtk / playerDef)) / 50) + 2);
+
+            battle.playerPokemon.currentHp -= enemyDamage;
+            if (battle.playerPokemon.currentHp <= 0) battle.playerPokemon.currentHp = 0;
+
+            battleLog.push(`¡El ${battle.enemyPokemon.name.toUpperCase()} enemigo contraataca con TACKLE y hace ${enemyDamage} de daño!`);
         }
 
-        // Sumamos un turno al contador
-        battle.turn += 1;
+        // --- COMPROBAR GANADOR ---
+        if (battle.enemyPokemon.currentHp === 0) battle.status = 'won';
+        else if (battle.playerPokemon.currentHp === 0) battle.status = 'lost';
 
-        // 6. ¡GUARDAMOS LOS CAMBIOS EN MONGODB!
+        battle.turn += 1;
         await battle.save();
 
-        // 7. Devolvemos la "pantalla de resultados" de este turno
+        // Devolvemos el registro de todo lo que ha pasado en este turno
         res.status(200).json({
-            log: `¡${attackerRecord.name.toUpperCase()} usa ${moveName.toUpperCase()}!`,
-            dañoCausado: finalDamage,
-            efectividad: typeMultiplier > 1 ? "¡Es muy eficaz!" : (typeMultiplier < 1 && typeMultiplier > 0 ? "No es muy eficaz..." : (typeMultiplier === 0 ? "No hace efecto." : "")),
+            log: battleLog,
             estadoCombate: {
                 turnoActual: battle.turn,
                 estado: battle.status,
