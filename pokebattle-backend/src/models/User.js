@@ -21,16 +21,12 @@ const UserSchema = new mongoose.Schema({
         required: true
     },
     pokemonTeam: {
-        type: Array, // Aquí guardaremos los IDs de sus 6 Pokémon favoritos más adelante
+        type: Array,
         default: []
     },
-    wins: {
+    levelProgress: {
         type: Number,
-        default: 0
-    },
-    losses: {
-        type: Number,
-        default: 0
+        default: 1
     },
     createdAt: {// Fecha de creación del usuario
         type: Date,

@@ -1,13 +1,30 @@
 "use strict";
 
 const Battle = require('../models/Battle');
+const User = require('../models/User');
 
 exports.startBattle = async (req, res) => {
     try {
         const { userId, playerName, enemyName } = req.body;
+        const playerPokeName = playerName.toLowerCase();
 
+        // 1. VERIFICACIÓN DE EQUIPO
+        // Buscamos al usuario en la base de datos
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: "Entrenador no encontrado." });
+        }
+
+        // Comprobamos si el Pokémon está en su array pokemonTeam
+        if (!user.pokemonTeam.includes(playerPokeName)) {
+            return res.status(400).json({ 
+                message: `¡No puedes luchar con ${playerPokeName} porque no está en tu equipo! Captúralo primero.` 
+            });
+        }
+
+        // 2. Buscamos la vida máxima de ambos Pokémon en la PokeAPI
         const [playerRes, enemyRes] = await Promise.all([
-            fetch(`https://pokeapi.co/api/v2/pokemon/${playerName.toLowerCase()}`),
+            fetch(`https://pokeapi.co/api/v2/pokemon/${playerPokeName}`),
             fetch(`https://pokeapi.co/api/v2/pokemon/${enemyName.toLowerCase()}`)
         ]);
 
@@ -18,33 +35,32 @@ exports.startBattle = async (req, res) => {
         const player = await playerRes.json();
         const enemy = await enemyRes.json();
 
-        const playerHp = player.stats.find(stat => stat.stat.name === 'hp')?.base_stat;
-        const enemyHp = enemy.stats.find(stat => stat.stat.name === 'hp')?.base_stat;
+        const playerHp = player.stats.find(s => s.stat.name === 'hp').base_stat;
+        const enemyHp = enemy.stats.find(s => s.stat.name === 'hp').base_stat;
 
-        if (!playerHp || !enemyHp) {
-            return res.status(400).json({ message: "No se pudo obtener la vida base de los Pokémon." });
-        }
-
-        const battle = new Battle({
-            userId,
+        // 3. Creamos el registro del combate
+        const newBattle = new Battle({
+            userId: userId,
             playerPokemon: {
-                name: player.name,
+                name: playerPokeName,
                 maxHp: playerHp,
-                currentHp: playerHp
+                currentHp: playerHp 
             },
             enemyPokemon: {
-                name: enemy.name,
+                name: enemyName.toLowerCase(),
                 maxHp: enemyHp,
                 currentHp: enemyHp
             }
         });
 
-        await battle.save();
+        await newBattle.save();
 
         res.status(201).json({
-            message: "Combate iniciado con éxito",
-            battle
+            message: `¡${playerName.toUpperCase()} sal a luchar contra el ${enemyName.toUpperCase()} salvaje!`,
+            battleId: newBattle._id,
+            estado: newBattle
         });
+
     } catch (error) {
         res.status(500).json({ message: "Error al iniciar el combate", error: error.message });
     }
