@@ -5,7 +5,7 @@ const User = require('../models/User');
 
 exports.startBattle = async (req, res) => {
     try {
-        const { userId, playerName, enemyName } = req.body;
+        const { userId, playerName, enemyName, isBossBattle } = req.body;
         const playerPokeName = playerName.toLowerCase();
 
         // 1. VERIFICACIÓN DE EQUIPO
@@ -41,6 +41,7 @@ exports.startBattle = async (req, res) => {
         // 3. Creamos el registro del combate
         const newBattle = new Battle({
             userId: userId,
+            isBossBattle: isBossBattle || false,
             playerPokemon: {
                 name: playerPokeName,
                 maxHp: playerHp,
@@ -113,7 +114,13 @@ exports.simulateAttack = async (req, res) => {
         }
 
         // --- COMPROBAR GANADOR ---
-        if (battle.enemyPokemon.currentHp === 0) battle.status = 'won';
+        if (battle.enemyPokemon.currentHp === 0) {
+            battle.status = 'won';
+            if (battle.isBossBattle) {
+                await User.findByIdAndUpdate(battle.userId, { $inc: { levelProgress: 1 } });
+                battleLog.push("¡Has derrotado al jefe! ¡Se ha desbloqueado el siguiente nivel!");
+            }
+        }
         else if (battle.playerPokemon.currentHp === 0) battle.status = 'lost';
 
         battle.turn += 1;
