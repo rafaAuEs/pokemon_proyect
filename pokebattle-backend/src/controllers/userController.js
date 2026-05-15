@@ -1,6 +1,7 @@
 "use strict";
 
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
 
 exports.registerUser = async (req, res) => {
     try {
@@ -34,15 +35,21 @@ exports.loginUser = async (req, res) => {
             return res.status(400).json({ message: "Contraseña incorrecta" });
         }
 
-        // 3. Si todo es correcto, devolvemos éxito
+        const token = jwt.sign(
+            { id: user._id, email: user.email }, // Datos que guardamos dentro del token
+            'tu_clave_secreta_super_segura',     // La misma clave del middleware
+            { expiresIn: '24h' }                 // El token caduca en un día
+        );
+
         res.status(200).json({
             message: "¡Login exitoso!",
+            token, // envia el token al cliente para que lo guarde (en localStorage o cookies)
             user: {
                 id: user._id,
                 username: user.username,
                 email: user.email,
-                wins: user.wins,
-                losses: user.losses
+                levelProgress: user.levelProgress,
+                pokemonTeam: user.pokemonTeam
             }
         });
 
@@ -104,7 +111,7 @@ exports.removePokemonFromTeam = async (req, res) => {
             return res.status(404).json({ message: "Entrenador no encontrado" });
         }
 
-        // Filtramos el array: nos quedamos con todos los Pokémon DISTINTOS al que queremos borrar
+        // Filtramos el array
         const nombreEnMinusculas = pokemonName.toLowerCase();
         user.pokemonTeam = user.pokemonTeam.filter(pokemon => pokemon !== nombreEnMinusculas);
 

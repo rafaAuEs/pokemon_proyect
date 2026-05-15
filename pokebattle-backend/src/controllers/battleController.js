@@ -2,6 +2,7 @@
 
 const Battle = require('../models/Battle');
 const User = require('../models/User');
+const levelsConfig = require('../config/levels');
 
 exports.startBattle = async (req, res) => {
     try {
@@ -139,5 +140,44 @@ exports.simulateAttack = async (req, res) => {
 
     } catch (error) {
         res.status(500).json({ message: "Error crítico en el turno", error: error.message });
+    }
+};
+
+exports.generateEncounter = async (req, res) => {
+    try {
+        const { userId, wantBoss } = req.body; // wantBoss será true si el jugador pulsa "Luchar contra el Jefe"
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: "Entrenador no encontrado" });
+
+        const currentLevel = user.levelProgress;
+        const levelData = levelsConfig[currentLevel];
+
+        // Si el usuario ya se ha pasado el juego (ej: nivel 3 pero solo hay 2)
+        if (!levelData) {
+            return res.status(200).json({ message: "¡Has completado todos los niveles del juego!" });
+        }
+
+        let enemyName = "";
+        let isBossBattle = false;
+
+        if (wantBoss) {
+            // El jugador ha decidido enfrentarse al jefe del nivel
+            enemyName = levelData.boss;
+            isBossBattle = true;
+        } else {
+            // El jugador está explorando: cogemos un Pokémon aleatorio de la lista de su nivel
+            const randomIndex = Math.floor(Math.random() * levelData.wildPokemon.length);
+            enemyName = levelData.wildPokemon[randomIndex];
+        }
+
+        res.status(200).json({
+            message: isBossBattle ? `¡Atención! Te enfrentas al líder del nivel: ${enemyName.toUpperCase()}` : `¡Un ${enemyName.toUpperCase()} salvaje ha aparecido en ${levelData.name}!`,
+            enemyName: enemyName,
+            isBossBattle: isBossBattle
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: "Error al generar el encuentro", error: error.message });
     }
 };
