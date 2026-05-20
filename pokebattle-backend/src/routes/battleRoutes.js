@@ -11,5 +11,9 @@ router.post('/start', battleController.startBattle);
 router.post('/attack', battleController.simulateAttack);
 // Ruta para generar un encuentro.
 router.post('/encounter', battleController.generateEncounter);
+// Ruta para cambiar de Pokémon en combate.
+router.post('/switch', battleController.switchPokemon);
+// Ruta para huir del combate.
+router.post('/flee', battleController.fleeFromBattle);
 
 module.exports = router;

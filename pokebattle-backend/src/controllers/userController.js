@@ -127,3 +127,23 @@ exports.removePokemonFromTeam = async (req, res) => {
         res.status(500).json({ message: "Error al liberar el Pokémon", error: error.message });
     }
 };
+
+// Reiniciar el progreso del jugador (volver al nivel 1)
+exports.resetProgress = async (req, res) => {
+    try {
+        const { userId } = req.body;
+
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { levelProgress: 1 },
+            { new: true }
+        );
+        if (!user) {
+            return res.status(404).json({ message: 'Entrenador no encontrado' });
+        }
+
+        res.status(200).json({ message: 'Progreso reiniciado. ¡Nueva aventura!', levelProgress: user.levelProgress });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al reiniciar progreso', error: error.message });
+    }
+};

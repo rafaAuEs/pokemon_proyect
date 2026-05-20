@@ -11,4 +11,6 @@ router.post('/login', userController.loginUser);
 router.post('/team/add', userController.addPokemonToTeam);
 // Ruta para liberar un Pokémon del equipo del usuario
 router.post('/team/remove', userController.removePokemonFromTeam);
+// Ruta para reiniciar el progreso del jugador
+router.post('/reset', userController.resetProgress);
 module.exports = router;

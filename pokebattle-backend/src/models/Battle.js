@@ -18,9 +18,19 @@ const BattleSchema = new mongoose.Schema({
         maxHp: Number,
         currentHp: Number
     },
+    teamState: [{
+        name: { type: String },
+        maxHp: { type: Number },
+        currentHp: { type: Number }
+    }],
+    enemyTeamState: [{
+        name: { type: String },
+        maxHp: { type: Number },
+        currentHp: { type: Number }
+    }],
     status: { 
         type: String, 
-        enum: ['ongoing', 'won', 'lost'], // ongoing = en curso
+        enum: ['ongoing', 'won', 'lost', 'fled'], // ongoing = en curso
         default: 'ongoing' 
     },
     turn: {

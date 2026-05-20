@@ -4,12 +4,14 @@ const levels = {
     1: {
         name: "Bosque Verde",
         wildPokemon: ['rattata', 'pidgey', 'caterpie', 'weedle'],
-        boss: 'onix' // El jefe de nivel
+        boss: 'onix',
+        bossTeam: ['onix', 'golem', 'marowak', 'ninetales', 'omastar', 'kabutops']
     },
     2: {
         name: "Cueva Oscura",
         wildPokemon: ['zubat', 'machop', 'geodude', 'mankey'],
-        boss: 'starmie' // El jefe final
+        boss: 'starmie',
+        bossTeam: ['zubat', 'machop', 'geodude', 'starmie']
     }
 };
 
