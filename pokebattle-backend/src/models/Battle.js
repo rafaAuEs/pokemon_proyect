@@ -9,19 +9,27 @@ const BattleSchema = new mongoose.Schema({
         required: true 
     },
     playerPokemon: {
-        name: String,
-        maxHp: Number,
-        currentHp: Number
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'PokemonInstance'
     },
     enemyPokemon: {
+        pokemonId: Number,
         name: String,
-        maxHp: Number,
-        currentHp: Number
+        level: Number,
+        stats: {
+            hp: Number,
+            attack: Number,
+            defense: Number,
+            spAttack: Number,
+            spDefense: Number,
+            speed: Number
+        },
+        currentHp: Number,
+        isBoss: Boolean
     },
     teamState: [{
-        name: { type: String },
-        maxHp: { type: Number },
-        currentHp: { type: Number }
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'PokemonInstance'
     }],
     enemyTeamState: [{
         name: { type: String },

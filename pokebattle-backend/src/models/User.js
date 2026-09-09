@@ -20,13 +20,17 @@ const UserSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    pokemonTeam: {
-        type: Array,
-        default: []
-    },
     levelProgress: {
         type: Number,
         default: 1
+    },
+    inventory: [{
+        itemId: String,
+        quantity: Number
+    }],
+    activeBattle: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Battle'
     },
     createdAt: {// Fecha de creación del usuario
         type: Date,

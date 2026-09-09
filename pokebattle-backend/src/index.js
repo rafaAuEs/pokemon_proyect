@@ -1,45 +1,20 @@
 "use strict";
 
-// 1. Importar las dependencias (Librerías)
-const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
-require('dotenv').config(); // Carga las variables del archivo .env
+require('dotenv').config();
+const app = require('./app');
 
-// 2. Inicializar la aplicación Express
-const app = express();
-
-// 3. Middlewares (Configuraciones base)
-app.use(express.json()); // Permite que el servidor entienda datos en formato JSON
-app.use(cors()); // Permite que tu Web y tu App móvil hagan peticiones
-
-// 4. Ruta de prueba
-app.get('/', (req, res) => {
-    res.send('¡El motor de PokeBattle está funcionando perfectamente!');
-});
-
-// 5. Conexión a MongoDB Atlas y arranque del servidor
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 
-// Importamos las rutas
-const userRoutes = require('./routes/userRoutes');
-const pokemonRoutes = require('./routes/pokemonRoutes');
-const battleRoutes = require('./routes/battleRoutes');
-
-// Usamos las rutas
-app.use('/api/users', userRoutes);
-app.use('/api/pokemon', pokemonRoutes);
-app.use('/api/battle', battleRoutes);
-
-app.get('/api/health', (req, res) => {
-    res.json({ ok: true, service: 'pokebattle-backend' });
-});
+if (!MONGO_URI) {
+    console.error('❌ Error: MONGO_URI no está definida en el archivo .env');
+    process.exit(1);
+}
 
 mongoose.connect(MONGO_URI)
     .then(() => {
         console.log('✅ Conectado a MongoDB Atlas con éxito');
-        // Solo levantamos el servidor si la base de datos responde
         app.listen(PORT, () => {
             console.log(`🚀 Servidor corriendo en el puerto ${PORT}`);
         });
