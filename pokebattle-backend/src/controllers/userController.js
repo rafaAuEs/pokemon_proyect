@@ -7,8 +7,9 @@ exports.registerUser = async (req, res) => {
     try {
         const { username, email, password } = req.body;
         
-        // Creamos una nueva instancia del modelo User
-        const newUser = new User({ username, email, password });
+        // Creamos una nueva instancia del modelo User con el equipo inicial
+        const starterTeam = ['pikachu', 'mew', 'venusaur', 'snorlax', 'blastoise', 'charizard'];
+        const newUser = new User({ username, email, password, pokemonTeam: starterTeam });
         
         // Lo guardamos en MongoDB Atlas
         await newUser.save();
@@ -43,13 +44,14 @@ exports.loginUser = async (req, res) => {
 
         res.status(200).json({
             message: "¡Login exitoso!",
-            token, // envia el token al cliente para que lo guarde (en localStorage o cookies)
+            token,
             user: {
                 id: user._id,
                 username: user.username,
                 email: user.email,
                 levelProgress: user.levelProgress,
-                pokemonTeam: user.pokemonTeam
+                pokemonTeam: user.pokemonTeam,
+                pokemonBox: user.pokemonBox
             }
         });
 
@@ -87,13 +89,13 @@ exports.addPokemonToTeam = async (req, res) => {
             return res.status(400).json({ message: "¡Ya tienes a este Pokémon en tu equipo!" });
         }
 
-        // 5. Añadimos el Pokémon al array y guardamos
-        user.pokemonTeam.push(nameLower);
-        await user.save();
+        // 5. Añadimos el Pokémon al array usando operación nativa MongoDB
+        await User.findByIdAndUpdate(userId, { $addToSet: { pokemonTeam: nameLower } });
+        const updated = await User.findById(userId);
 
         res.status(200).json({ 
             message: `${pokemonName.toUpperCase()} se ha unido a tu equipo.`, 
-            team: user.pokemonTeam 
+            team: updated.pokemonTeam || []
         });
 
     } catch (error) {
@@ -111,20 +113,38 @@ exports.removePokemonFromTeam = async (req, res) => {
             return res.status(404).json({ message: "Entrenador no encontrado" });
         }
 
-        // Filtramos el array
+        // Filtramos el array con operación nativa MongoDB
         const nombreEnMinusculas = pokemonName.toLowerCase();
-        user.pokemonTeam = user.pokemonTeam.filter(pokemon => pokemon !== nombreEnMinusculas);
-
-        // Guardamos el usuario actualizado en la base de datos
-        await user.save();
+        await User.findByIdAndUpdate(userId, { $pull: { pokemonTeam: nombreEnMinusculas } });
+        const updated = await User.findById(userId);
 
         res.status(200).json({ 
             message: `${pokemonName.toUpperCase()} ha sido liberado de tu equipo.`, 
-            team: user.pokemonTeam 
+            team: updated.pokemonTeam || []
         });
 
     } catch (error) {
         res.status(500).json({ message: "Error al liberar el Pokémon", error: error.message });
+    }
+};
+
+// Obtener el usuario autenticado a partir del token
+exports.getMe = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ message: 'Entrenador no encontrado' });
+        }
+        res.status(200).json({
+            id: user._id,
+            username: user.username,
+            email: user.email,
+            levelProgress: user.levelProgress || 1,
+            pokemonTeam: user.pokemonTeam || [],
+            pokemonBox: user.pokemonBox || []
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al obtener el usuario', error: error.message });
     }
 };
 
@@ -145,5 +165,119 @@ exports.resetProgress = async (req, res) => {
         res.status(200).json({ message: 'Progreso reiniciado. ¡Nueva aventura!', levelProgress: user.levelProgress });
     } catch (error) {
         res.status(500).json({ message: 'Error al reiniciar progreso', error: error.message });
+    }
+};
+
+// Mover un Pokémon del equipo al PC de Bill
+exports.moveToBox = async (req, res) => {
+    try {
+        const { userId, pokemonName } = req.body;
+        const name = pokemonName.toLowerCase();
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: 'Entrenador no encontrado' });
+        const team = user.pokemonTeam || [];
+        const box = user.pokemonBox || [];
+        if (!team.includes(name))
+            return res.status(400).json({ message: `${name.toUpperCase()} no está en tu equipo.` });
+        if (team.length <= 1)
+            return res.status(400).json({ message: 'Debes tener al menos un Pokémon en el equipo.' });
+
+        await User.findByIdAndUpdate(userId, {
+            $pull: { pokemonTeam: name },
+            $addToSet: { pokemonBox: name }
+        });
+        const refreshed = await User.findById(userId);
+        res.status(200).json({
+            message: `${name.toUpperCase()} enviado al PC de Bill.`,
+            pokemonTeam: refreshed.pokemonTeam || [],
+            pokemonBox: refreshed.pokemonBox || []
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al mover al PC', error: error.message });
+    }
+};
+
+// Mover un Pokémon del PC de Bill al equipo
+exports.moveToTeam = async (req, res) => {
+    try {
+        const { userId, pokemonName } = req.body;
+        const name = pokemonName.toLowerCase();
+
+        const user2 = await User.findById(userId);
+        if (!user2) return res.status(404).json({ message: 'Entrenador no encontrado' });
+        const box2 = user2.pokemonBox || [];
+        const team2 = user2.pokemonTeam || [];
+        if (!box2.includes(name))
+            return res.status(400).json({ message: `${name.toUpperCase()} no está en el PC.` });
+        if (team2.length >= 6)
+            return res.status(400).json({ message: 'El equipo está lleno. Manda uno al PC primero.' });
+
+        await User.findByIdAndUpdate(userId, {
+            $pull: { pokemonBox: name },
+            $addToSet: { pokemonTeam: name }
+        });
+        const refreshed2 = await User.findById(userId);
+        res.status(200).json({
+            message: `${name.toUpperCase()} se ha unido a tu equipo.`,
+            pokemonTeam: refreshed2.pokemonTeam || [],
+            pokemonBox: refreshed2.pokemonBox || []
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al mover al equipo', error: error.message });
+    }
+};
+
+// Soltar un Pokémon del PC (se elimina permanentemente)
+exports.releaseFromBox = async (req, res) => {
+    try {
+        const { userId, pokemonName } = req.body;
+        if (!userId || !pokemonName) {
+            return res.status(400).json({ message: 'Faltan datos: userId y pokemonName son necesarios.' });
+        }
+        const name = pokemonName.toLowerCase();
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: 'Entrenador no encontrado' });
+        if (!(user.pokemonBox || []).includes(name))
+            return res.status(400).json({ message: `${name.toUpperCase()} no está en el PC.` });
+
+        await User.findByIdAndUpdate(userId, { $pull: { pokemonBox: name } });
+        const refreshed = await User.findById(userId);
+        res.status(200).json({
+            message: `${name.toUpperCase()} ha sido liberado. ¡Adiós para siempre!`,
+            pokemonBox: refreshed.pokemonBox || []
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al soltar el Pokémon', error: error.message });
+    }
+};
+
+// Reordenar el equipo del jugador
+exports.reorderTeam = async (req, res) => {
+    try {
+        const { userId, newOrder } = req.body;
+
+        if (!Array.isArray(newOrder)) {
+            return res.status(400).json({ message: 'El nuevo orden debe ser un array de nombres.' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) return res.status(404).json({ message: 'Entrenador no encontrado' });
+
+        // Validar que el nuevo orden contiene exactamente los mismos pokémon
+        const currentSet = new Set(user.pokemonTeam);
+        const newSet = new Set(newOrder.map(n => n.toLowerCase()));
+        const sameContent = currentSet.size === newSet.size && [...currentSet].every(p => newSet.has(p));
+        if (!sameContent) {
+            return res.status(400).json({ message: 'El nuevo orden debe contener exactamente los mismos Pokémon del equipo.' });
+        }
+
+        user.pokemonTeam = newOrder.map(n => n.toLowerCase());
+        await user.save();
+
+        res.status(200).json({ message: 'Orden del equipo actualizado.', pokemonTeam: user.pokemonTeam });
+    } catch (error) {
+        res.status(500).json({ message: 'Error al reordenar el equipo', error: error.message });
     }
 };

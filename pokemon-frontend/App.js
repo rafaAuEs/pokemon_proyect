@@ -1,19 +1,62 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ActivityIndicator, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from './apiConfig';
+import HomeScreen from './screens/HomeScreen';
+import BattleScreen from './screens/BattleScreen';
+import VictoryScreen from './screens/VictoryScreen';
 
 export default function App() {
+  // Todos los hooks al inicio, sin condiciones intermedias
   const [loading, setLoading] = useState(false);
+  const [restoringSession, setRestoringSession] = useState(true);
   const [user, setUser] = useState(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  
-  // NUEVO: Estado para saber si estamos en combate y con quién
+  const [showRegister, setShowRegister] = useState(false);
+  const [regUsername, setRegUsername] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [currentBattle, setCurrentBattle] = useState(null);
   const [showSwitchPanel, setShowSwitchPanel] = useState(false);
   const [gameCompleted, setGameCompleted] = useState(false);
   const [levelWon, setLevelWon] = useState(false);
+
+  // Al arrancar la app, intentamos restaurar la sesión con el token guardado
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (!token) { setRestoringSession(false); return; }
+        const response = await fetch(`${API_URL}/users/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const userData = await response.json();
+          setUser(userData);
+        } else {
+          // Token expirado o inválido: limpiamos el almacenamiento
+          await AsyncStorage.removeItem('userToken');
+          await AsyncStorage.removeItem('userId');
+        }
+      } catch (e) {
+        // Sin conexión al arrancar: no hacemos nada, se muestra el login
+      } finally {
+        setRestoringSession(false);
+      }
+    };
+    restoreSession();
+  }, []);
+
+  if (restoringSession) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#ff5a5f" />
+        <Text style={{ marginTop: 12, color: '#555' }}>Cargando sesión...</Text>
+      </View>
+    );
+  }
 
   const handleLogin = async () => {
     if (!email || !password) return Alert.alert("Error", "Rellena los campos");
@@ -34,6 +77,34 @@ export default function App() {
       }
     } catch (error) {
       Alert.alert("Error", "No se pudo conectar");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!regUsername || !regEmail || !regPassword || !regConfirmPassword) return Alert.alert("Error", "Rellena todos los campos");
+    if (regPassword !== regConfirmPassword) return Alert.alert("Error", "Las contraseñas no coinciden");
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/users/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: regUsername, email: regEmail, password: regPassword }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        Alert.alert("¡Registro exitoso!", "Ya puedes iniciar sesión con tu nueva cuenta.");
+        setRegUsername('');
+        setRegEmail('');
+        setRegPassword('');
+        setRegConfirmPassword('');
+        setShowRegister(false);
+      } else {
+        Alert.alert("Error al registrarse", data.message || "Inténtalo de nuevo");
+      }
+    } catch (error) {
+      Alert.alert("Error", "No se pudo conectar con el servidor");
     } finally {
       setLoading(false);
     }
@@ -62,7 +133,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({
             userId,
-            playerName: 'pikachu',
+            playerName: user.pokemonTeam?.[0] || 'pikachu',
             enemyName: data.enemyName,
             isBossBattle: data.isBossBattle
           }),
@@ -75,6 +146,8 @@ export default function App() {
         setCurrentBattle({
           battleId: startData.battleId,
           enemyName: data.enemyName.toUpperCase(),
+          enemyPokemonName: data.enemyName.toLowerCase(),
+          bossName: data.bossName || data.enemyName.toUpperCase(),
           message: data.message,
           isBoss: data.isBossBattle,
           enemyHp: startData.estado.enemyPokemon.currentHp,
@@ -84,6 +157,13 @@ export default function App() {
           currentPokemonName: startData.estado.playerPokemon.name,
           teamState: startData.estado.teamState,
         });
+        // Si el backend añadió pikachu como inicial (equipo vacío), actualizamos el estado local
+        if (!user.pokemonTeam || user.pokemonTeam.length === 0) {
+          setUser(prev => ({
+            ...prev,
+            pokemonTeam: startData.estado.teamState.map(p => p.name)
+          }));
+        }
       }
     } catch (error) {
       Alert.alert("Error", "Error al buscar oponente");
@@ -111,15 +191,16 @@ export default function App() {
       const data = await response.json();
 
       if (response.ok) {
-        const [enemyHp] = data.estadoCombate.vidaEnemigo.split(' / ').map(Number);
+        const [enemyHp, enemyMaxHp] = data.estadoCombate.vidaEnemigo.split(' / ').map(Number);
         const [playerHp] = data.estadoCombate.vidaJugador.split(' / ').map(Number);
 
         setCurrentBattle(prev => ({
           ...prev,
           enemyHp,
+          enemyMaxHp,
           playerHp,
           currentPokemonName: data.estadoCombate.pokemonActual,
-          enemyPokemonName: data.estadoCombate.enemyPokemonActual || prev.enemyName.toLowerCase(),
+          enemyPokemonName: data.estadoCombate.enemyPokemonActual || prev.enemyPokemonName,
           teamState: data.estadoCombate.teamState,
           needsSwitch: data.estadoCombate.needsSwitch || false,
         }));
@@ -175,12 +256,13 @@ export default function App() {
       const data = await response.json();
       if (response.ok) {
         const [playerHp, playerMaxHp] = data.estadoCombate.vidaJugador.split(' / ').map(Number);
-        const [enemyHp] = data.estadoCombate.vidaEnemigo.split(' / ').map(Number);
+        const [enemyHp, enemyMaxHp] = data.estadoCombate.vidaEnemigo.split(' / ').map(Number);
         setCurrentBattle(prev => ({
           ...prev,
           playerHp,
           playerMaxHp,
           enemyHp,
+          enemyMaxHp,
           currentPokemonName: data.estadoCombate.pokemonActual,
           enemyPokemonName: data.estadoCombate.enemyPokemonActual || prev.enemyPokemonName,
           teamState: data.estadoCombate.teamState,
@@ -208,229 +290,308 @@ export default function App() {
     }
   };
 
+  // --- PC DE BILL: MOVER POKÉMON ENTRE EQUIPO Y CAJA ---
+  const handleMoveToBox = async (pokemonName) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const userId = await AsyncStorage.getItem('userId');
+      const res = await fetch(`${API_URL}/users/team/move-to-box`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId, pokemonName }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUser(prev => ({ ...prev, pokemonTeam: data.pokemonTeam, pokemonBox: data.pokemonBox }));
+      } else {
+        Alert.alert('Error', data.message);
+      }
+    } catch (e) {
+      Alert.alert('Error de conexión', 'No se pudo mover el Pokémon.');
+    }
+  };
+
+  const handleConfirmRelease = async (pokemonName) => {
+    if (!pokemonName) return;
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const userId = await AsyncStorage.getItem('userId');
+      const res = await fetch(`${API_URL}/users/box/release`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId, pokemonName }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUser(prev => ({ ...prev, pokemonBox: data.pokemonBox }));
+      } else {
+        Alert.alert('Error', data.message);
+      }
+    } catch (e) {
+      Alert.alert('Error de conexión', 'No se pudo soltar el Pokémon.');
+    }
+  };
+
+  const handleMoveToTeam = async (pokemonName) => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const userId = await AsyncStorage.getItem('userId');
+      const res = await fetch(`${API_URL}/users/team/move-to-team`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId, pokemonName }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setUser(prev => ({ ...prev, pokemonTeam: data.pokemonTeam, pokemonBox: data.pokemonBox }));
+      } else {
+        Alert.alert('Error', data.message);
+      }
+    } catch (e) {
+      Alert.alert('Error de conexión', 'No se pudo mover el Pokémon.');
+    }
+  };
+
+  // --- LÓGICA DE REORDENACIÓN DEL EQUIPO ---
+  const handleReorder = async (index, direction) => {
+    const team = [...(user.pokemonTeam || [])];
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= team.length) return;
+
+    // Intercambiar posiciones
+    [team[index], team[newIndex]] = [team[newIndex], team[index]];
+
+    // Actualizar estado local de inmediato para respuesta visual rápida
+    setUser(prev => ({ ...prev, pokemonTeam: team }));
+
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const userId = await AsyncStorage.getItem('userId');
+      const response = await fetch(`${API_URL}/users/team/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId, newOrder: team }),
+      });
+      if (!response.ok) {
+        // Revertir si falla
+        const original = [...(user.pokemonTeam || [])];
+        setUser(prev => ({ ...prev, pokemonTeam: original }));
+        Alert.alert('Error', 'No se pudo guardar el nuevo orden.');
+      }
+    } catch (e) {
+      Alert.alert('Error de conexión', 'No se pudo guardar el orden del equipo.');
+    }
+  };
+
+  // --- LÓGICA DE CAPTURA ---
+  const handleCatch = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await fetch(`${API_URL}/battle/catch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ battleId: currentBattle.battleId }),
+      });
+      const data = await response.json();
+
+      if (data.caught) {
+        // Re-fetch del usuario para garantizar que el menú refleja el estado real de la BD
+        try {
+          const meRes = await fetch(`${API_URL}/users/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (meRes.ok) {
+            const updatedUser = await meRes.json();
+            setUser(updatedUser);
+          } else {
+            // Fallback: actualizar solo el campo que cambió
+            if (data.sentToBox) {
+              setUser(prev => ({ ...prev, pokemonBox: data.pokemonBox }));
+            } else {
+              setUser(prev => ({ ...prev, pokemonTeam: data.pokemonTeam }));
+            }
+          }
+        } catch (_) {
+          if (data.sentToBox) {
+            setUser(prev => ({ ...prev, pokemonBox: data.pokemonBox }));
+          } else {
+            setUser(prev => ({ ...prev, pokemonTeam: data.pokemonTeam }));
+          }
+        }
+        Alert.alert('¡Capturado! ⚾', data.message);
+        setCurrentBattle(null);
+      } else {
+        // Fallo: actualizar HP tras contraataque del enemigo
+        if (data.estadoCombate) {
+          const [playerHp] = data.estadoCombate.vidaJugador.split(' / ').map(Number);
+          setCurrentBattle(prev => ({
+            ...prev,
+            playerHp,
+            teamState: data.estadoCombate.teamState,
+            needsSwitch: data.estadoCombate.needsSwitch || false,
+          }));
+          if (data.estadoCombate.needsSwitch) {
+            setShowSwitchPanel(true);
+          }
+          if (data.estadoCombate.estado === 'lost') {
+            Alert.alert('💀 ¡DERROTA!', 'Todos tus Pokémon se han debilitado.');
+            setCurrentBattle(null);
+            return;
+          }
+        }
+        Alert.alert('¡Escapó! 💨', data.message);
+      }
+    } catch (error) {
+      Alert.alert('Error de conexión', 'No se pudo lanzar la Pokéball');
+    }
+  };
+
+  const handleFlee = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      await fetch(`${API_URL}/battle/flee`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ battleId: currentBattle.battleId }),
+      });
+    } finally {
+      setCurrentBattle(null);
+    }
+  };
+
+  const handleVictoryContinue = async () => {
+    if (levelWon) {
+      setLevelWon(false);
+      return;
+    }
+
+    try {
+      const storedId = await AsyncStorage.getItem('userId');
+      if (storedId) {
+        await fetch(`${API_URL}/users/reset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: storedId }),
+        });
+      }
+    } catch (e) { /* ignorar errores de red */ }
+    setGameCompleted(false);
+    setUser(prev => ({ ...prev, levelProgress: 1 }));
+  };
+
   // --- RENDERS CONDICIONALES ---
 
   // PANTALLA 4: NIVEL SUPERADO (jefe intermedio derrotado)
   if (levelWon) {
     const beatenLevel = (user?.levelProgress || 2) - 1;
     return (
-      <View style={[styles.container, { backgroundColor: '#27ae60' }]}>
-        <Text style={{ fontSize: 60, marginBottom: 10 }}>🏅</Text>
-        <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#fff', textAlign: 'center', marginBottom: 10 }}>
-          ¡NIVEL {beatenLevel} SUPERADO!
-        </Text>
-        <Text style={{ fontSize: 16, color: '#fff', textAlign: 'center', marginBottom: 40 }}>
-          Has derrotado al líder del gimnasio{'\n'}y desbloqueado el nivel {beatenLevel + 1}.
-        </Text>
-        <Text style={{ fontSize: 40, marginBottom: 30 }}>⭐🎖️⭐</Text>
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: '#1e8449' }]}
-          onPress={() => setLevelWon(false)}
-        >
-          <Text style={styles.buttonText}>Volver al menú</Text>
-        </TouchableOpacity>
-      </View>
+      <VictoryScreen
+        username={user?.username}
+        beatenLevel={beatenLevel}
+        gameCompleted={false}
+        onContinue={handleVictoryContinue}
+      />
     );
   }
 
   // PANTALLA 5: FIN DEL JUEGO (último jefe derrotado)
   if (gameCompleted) {
     return (
-      <View style={[styles.container, { backgroundColor: '#f39c12' }]}>
-        <Text style={{ fontSize: 60, marginBottom: 10 }}>🏆</Text>
-        <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#fff', textAlign: 'center', marginBottom: 10 }}>
-          ¡ENHORABUENA, {user?.username?.toUpperCase()}!
-        </Text>
-        <Text style={{ fontSize: 16, color: '#fff', textAlign: 'center', marginBottom: 40 }}>
-          Has derrotado a todos los líderes de gimnasio{'\n'}y completado el juego.
-        </Text>
-        <Text style={{ fontSize: 40, marginBottom: 30 }}>💎🔥💎</Text>
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: '#c0392b' }]}
-          onPress={async () => {
-            try {
-              const storedId = await AsyncStorage.getItem('userId');
-              if (storedId) {
-                await fetch(`${API_URL}/users/reset`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ userId: storedId }),
-                });
-              }
-            } catch (e) { /* ignorar errores de red */ }
-            setGameCompleted(false);
-            setUser(prev => ({ ...prev, levelProgress: 1 }));
-          }}
-        >
-          <Text style={styles.buttonText}>Volver al menú</Text>
-        </TouchableOpacity>
-      </View>
+      <VictoryScreen
+        username={user?.username}
+        gameCompleted
+        onContinue={handleVictoryContinue}
+      />
     );
   }
 
-// PANTALLA 3: ARENA DE COMBATE
+  // PANTALLA 3: ARENA DE COMBATE
   if (currentBattle) {
-    // Convertimos el nombre a minúsculas para la URL de la imagen
-    const enemyNameLower = currentBattle.enemyName.toLowerCase();
-    
     return (
-      <View style={[styles.container, { backgroundColor: currentBattle.isBoss ? '#2c3e50' : '#2ecc71' }]}>
-        <Text style={styles.battleHeader}>⚔️ MODO COMBATE ⚔️</Text>
-        <Text style={styles.battleMessage}>{currentBattle.message}</Text>
-
-        {/* --- ZONA ENEMIGA (Arriba) --- */}
-        <View style={styles.battleZoneRight}>
-          <View style={styles.pokemonInfo}>
-            <Text style={styles.pokemonName}>👹 {currentBattle.enemyName}</Text>
-            <Text style={styles.hpText}>HP: {currentBattle.enemyHp} / {currentBattle.enemyMaxHp}</Text>
-          </View>
-          <Image 
-            source={{ uri: `https://img.pokemondb.net/sprites/home/normal/${enemyNameLower}.png` }} 
-            style={styles.pokemonSprite}
-            resizeMode="contain"
-          />
-        </View>
-
-        {/* --- ZONA JUGADOR (Abajo) --- */}
-        <View style={styles.battleZoneLeft}>
-          <Image 
-            source={{ uri: `https://img.pokemondb.net/sprites/home/normal/${currentBattle.currentPokemonName}.png` }} 
-            style={styles.pokemonSprite}
-            resizeMode="contain"
-          />
-          <View style={styles.pokemonInfo}>
-            <Text style={styles.pokemonName}>🛡️ {currentBattle.currentPokemonName?.toUpperCase()} (Nivel {user?.levelProgress || 1})</Text>
-            <Text style={styles.hpText}>HP: {currentBattle.playerHp} / {currentBattle.playerMaxHp}</Text>
-          </View>
-        </View>
-
-        {/* --- BOTONERA --- */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.btnAttack} onPress={handleAttack}>
-            <Text style={styles.btnText}>💥 ATACAR</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.btnSwitch} onPress={() => setShowSwitchPanel(p => !p)}>
-            <Text style={styles.btnText}>🔄 CAMBIAR</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btnHuyen} onPress={async () => {
-            try {
-              const token = await AsyncStorage.getItem('userToken');
-              await fetch(`${API_URL}/battle/flee`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ battleId: currentBattle.battleId }),
-              });
-            } finally {
-              setCurrentBattle(null);
-            }
-          }}>
-            <Text style={styles.btnText}>🏃 HUIR</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* --- PANEL DE CAMBIO --- */}
-        {showSwitchPanel && (
-          <View style={styles.switchPanel}>
-            <Text style={styles.switchTitle}>
-              {currentBattle.needsSwitch ? '¡Elige tu siguiente Pokémon!' : 'Elige un Pokémon:'}
-            </Text>
-            {(currentBattle.teamState || [])
-              .filter(p => p.name !== currentBattle.currentPokemonName)
-              .map(p => (
-                <TouchableOpacity
-                  key={p.name}
-                  style={[styles.switchBtn, p.currentHp <= 0 && styles.switchBtnFainted]}
-                  onPress={() => p.currentHp > 0 && handleSwitch(p.name)}
-                  disabled={p.currentHp <= 0}
-                >
-                  <Text style={styles.switchBtnText}>
-                    {p.name.toUpperCase()}  HP: {p.currentHp}/{p.maxHp}{p.currentHp <= 0 ? '  💀' : ''}
-                  </Text>
-                </TouchableOpacity>
-              ))
-            }
-            {!currentBattle.needsSwitch && (
-              <TouchableOpacity style={styles.switchCancelBtn} onPress={() => setShowSwitchPanel(false)}>
-                <Text style={styles.switchBtnText}>Cancelar</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-      </View>
+      <BattleScreen
+        currentBattle={currentBattle}
+        user={user}
+        showSwitchPanel={showSwitchPanel}
+        setShowSwitchPanel={setShowSwitchPanel}
+        onAttack={handleAttack}
+        onCatch={handleCatch}
+        onSwitch={handleSwitch}
+        onFlee={handleFlee}
+      />
     );
   }
 
   // PANTALLA 2: MENÚ PRINCIPAL
   if (user) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.welcome}>¡Hola, {user.username}!</Text>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Estado del Entrenador</Text>
-          <Text>Nivel de Progreso: {user.levelProgress || 1}</Text>
-        </View>
-
-        <TouchableOpacity style={styles.btnExplore} onPress={() => handleEncounter(false)}>
-          <Text style={styles.btnText}>EXPLORAR (Hierba Alta)</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.btnGym} onPress={() => handleEncounter(true)}>
-          <Text style={styles.btnText}>GIMNASIO (Líder)</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => setUser(null)} style={{marginTop: 20}}>
-          <Text style={{color: 'red', fontWeight: 'bold'}}>Cerrar Sesión</Text>
-        </TouchableOpacity>
-      </View>
+      <HomeScreen
+        user={user}
+        onExplore={() => handleEncounter(false)}
+        onGym={() => handleEncounter(true)}
+        onReorder={handleReorder}
+        onMoveToBox={handleMoveToBox}
+        onMoveToTeam={handleMoveToTeam}
+        onConfirmRelease={handleConfirmRelease}
+        onLogout={async () => {
+          await AsyncStorage.removeItem('userToken');
+          await AsyncStorage.removeItem('userId');
+          setUser(null);
+        }}
+      />
     );
   }
 
-  // PANTALLA 1: LOGIN
+  // PANTALLA 1: LOGIN / REGISTRO
   return (
     <View style={styles.container}>
       <Text style={styles.title}>PokéBattle TFG</Text>
-      <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" />
-      <TextInput style={styles.input} placeholder="Contraseña" value={password} onChangeText={setPassword} secureTextEntry />
-      {loading ? <ActivityIndicator size="large" color="#ff5a5f" /> : <TouchableOpacity style={styles.button} onPress={handleLogin}><Text style={styles.buttonText}>ENTRAR</Text></TouchableOpacity>}
+
+      {showRegister ? (
+        <>
+          <TextInput style={styles.input} placeholder="Nombre de entrenador" value={regUsername} onChangeText={setRegUsername} autoCapitalize="none" />
+          <TextInput style={styles.input} placeholder="Email" value={regEmail} onChangeText={setRegEmail} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={styles.input} placeholder="Contraseña" value={regPassword} onChangeText={setRegPassword} secureTextEntry />
+          <TextInput style={styles.input} placeholder="Confirmar contraseña" value={regConfirmPassword} onChangeText={setRegConfirmPassword} secureTextEntry />
+          {loading
+            ? <ActivityIndicator size="large" color="#ff5a5f" />
+            : <TouchableOpacity style={styles.button} onPress={handleRegister}><Text style={styles.buttonText}>REGISTRARSE</Text></TouchableOpacity>
+          }
+          <TouchableOpacity onPress={() => setShowRegister(false)} style={{ marginTop: 16 }}>
+            <Text style={styles.toggleText}>¿Ya tienes cuenta? <Text style={styles.toggleLink}>Iniciar sesión</Text></Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" />
+          <TextInput style={styles.input} placeholder="Contraseña" value={password} onChangeText={setPassword} secureTextEntry />
+          {loading
+            ? <ActivityIndicator size="large" color="#ff5a5f" />
+            : <TouchableOpacity style={styles.button} onPress={handleLogin}><Text style={styles.buttonText}>ENTRAR</Text></TouchableOpacity>
+          }
+          <TouchableOpacity onPress={() => setShowRegister(true)} style={{ marginTop: 16 }}>
+            <Text style={styles.toggleText}>¿No tienes cuenta? <Text style={styles.toggleLink}>Regístrate aquí</Text></Text>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center', padding: 20 },
-  title: { fontSize: 32, fontWeight: 'bold', marginBottom: 40 },
-  welcome: { fontSize: 24, fontWeight: 'bold', marginBottom: 10 },
+  title: {
+    fontSize: 38,
+    fontWeight: '900',
+    color: '#2778C4',
+    marginBottom: 40,
+    textAlign: 'center',
+    textShadowColor: '#F5C94D',
+    textShadowOffset: { width: 2, height: 3 },
+    textShadowRadius: 3,
+  },
   input: { width: '100%', height: 50, backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 15, marginBottom: 20, borderWidth: 1, borderColor: '#ddd' },
   button: { width: '100%', height: 50, backgroundColor: '#ff5a5f', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  card: { width: '100%', backgroundColor: '#fff', padding: 20, borderRadius: 15, marginBottom: 30, elevation: 3 },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 5 },
-  btnExplore: { width: '100%', height: 60, backgroundColor: '#4CAF50', borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
-  btnGym: { width: '100%', height: 60, backgroundColor: '#2196F3', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  
-  // NUEVOS ESTILOS PARA LA ARENA DE COMBATE
-  battleHeader: { fontSize: 24, fontWeight: 'bold', color: '#fff', marginBottom: 5 },
-  battleMessage: { color: '#fff', fontStyle: 'italic', textAlign: 'center', marginBottom: 30 },
-  
-  battleZoneRight: { width: '100%', flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.85)', padding: 15, borderRadius: 12, marginBottom: 20, alignItems: 'center', justifyContent: 'space-between', alignSelf: 'flex-end' },
-  battleZoneLeft: { width: '100%', flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.85)', padding: 15, borderRadius: 12, marginBottom: 40, alignItems: 'center', justifyContent: 'space-between', alignSelf: 'flex-start' },
-  
-  pokemonInfo: { flex: 1, justifyContent: 'center' },
-  pokemonName: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  hpText: { fontSize: 14, fontWeight: 'bold', color: '#e74c3c', marginTop: 3 },
-  pokemonSprite: { width: 100, height: 100 },
-  
-  actionRow: { width: '100%', flexDirection: 'column', gap: 10 },
-  btnAttack: { width: '100%', height: 55, backgroundColor: '#e74c3c', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  btnSwitch: { width: '100%', height: 50, backgroundColor: '#e67e22', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  btnHuyen: { width: '100%', height: 50, backgroundColor: '#7f8c8d', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-
-  switchPanel: { width: '100%', backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 12, padding: 12, marginTop: 10 },
-  switchTitle: { color: '#fff', fontWeight: 'bold', fontSize: 15, marginBottom: 8 },
-  switchBtn: { backgroundColor: '#2ecc71', borderRadius: 8, padding: 10, marginBottom: 6 },
-  switchBtnFainted: { backgroundColor: '#555' },
-  switchCancelBtn: { backgroundColor: '#7f8c8d', borderRadius: 8, padding: 10, marginTop: 4 },
-  switchBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+  toggleText: { color: '#555', fontSize: 14 },
+  toggleLink: { color: '#ff5a5f', fontWeight: 'bold' },
 });

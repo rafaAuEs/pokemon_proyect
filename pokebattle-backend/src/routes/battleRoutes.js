@@ -15,5 +15,7 @@ router.post('/encounter', battleController.generateEncounter);
 router.post('/switch', battleController.switchPokemon);
 // Ruta para huir del combate.
 router.post('/flee', battleController.fleeFromBattle);
+// Ruta para intentar capturar un Pokémon salvaje.
+router.post('/catch', auth, battleController.catchPokemon);
 
 module.exports = router;

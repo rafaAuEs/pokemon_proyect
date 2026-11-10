@@ -16,8 +16,18 @@ exports.startBattle = async (req, res) => {
             return res.status(404).json({ message: "Entrenador no encontrado." });
         }
 
+        // Si el equipo está vacío, añadimos pikachu como inicial (operación nativa MongoDB)
+        let freshUser = user;
+        if (!user.pokemonTeam || user.pokemonTeam.length === 0) {
+            freshUser = await User.findByIdAndUpdate(
+                userId,
+                { $addToSet: { pokemonTeam: 'pikachu' } },
+                { new: true }
+            );
+        }
+
         // Comprobamos si el Pokémon está en su array pokemonTeam
-        if (!user.pokemonTeam.includes(playerPokeName)) {
+        if (!(freshUser.pokemonTeam || []).includes(playerPokeName)) {
             return res.status(400).json({ 
                 message: `¡No puedes luchar con ${playerPokeName} porque no está en tu equipo! Captúralo primero.` 
             });
@@ -25,21 +35,21 @@ exports.startBattle = async (req, res) => {
 
         // 2. Buscamos la vida del equipo del jugador
         const teamResponses = await Promise.all(
-            user.pokemonTeam.map(name => fetch(`https://pokeapi.co/api/v2/pokemon/${name}`))
+            freshUser.pokemonTeam.map(name => fetch(`https://pokeapi.co/api/v2/pokemon/${name}`))
         );
         const teamJsons = await Promise.all(teamResponses.map(r => r.json()));
         const teamState = teamJsons.map((p, i) => ({
-            name: user.pokemonTeam[i],
+            name: freshUser.pokemonTeam[i],
             maxHp: p.stats.find(s => s.stat.name === 'hp').base_stat,
             currentHp: p.stats.find(s => s.stat.name === 'hp').base_stat
         }));
 
-        const starterEntry = teamState.find(p => p.name === playerPokeName);
-        const playerHp = starterEntry ? starterEntry.maxHp : 45;
+            const starterEntry = teamState.find(p => p.name === playerPokeName);
+            const playerHp = starterEntry ? starterEntry.maxHp : 45;
 
-        // 3. Preparar datos del enemigo (boss o salvaje)
-        let enemyPokemonData, enemyTeamState = [];
-        if (isBossBattle) {
+            // 3. Preparar datos del enemigo (boss o salvaje)
+            let enemyPokemonData, enemyTeamState = [];
+            if (isBossBattle) {
             const levelData = levelsConfig[user.levelProgress];
             if (!levelData || !levelData.bossTeam) {
                 return res.status(400).json({ message: "No hay datos del equipo del jefe para este nivel." });
@@ -95,6 +105,7 @@ exports.simulateAttack = async (req, res) => {
         const battle = await Battle.findById(battleId);
         if (!battle) return res.status(404).json({ message: "Combate no encontrado" });
         if (battle.status !== 'ongoing') return res.status(400).json({ message: `Combate terminado. Resultado: ${battle.status}` });
+        if (battle.playerPokemon.currentHp <= 0) return res.status(400).json({ message: "Tu Pokémon está debilitado. ¡Cambia antes de atacar!" });
 
         // --- TURNO DEL JUGADOR ---
         const [attackerRes, defenderRes, moveRes] = await Promise.all([
@@ -239,9 +250,10 @@ exports.generateEncounter = async (req, res) => {
         }
 
         res.status(200).json({
-            message: isBossBattle ? `¡Atención! Te enfrentas al líder del nivel: ${enemyName.toUpperCase()}` : `¡Un ${enemyName.toUpperCase()} salvaje ha aparecido en ${levelData.name}!`,
+            message: isBossBattle ? `¡Atención! Te enfrentas a ${levelData.bossName}, el líder del gimnasio!` : `¡Un ${enemyName.toUpperCase()} salvaje ha aparecido en ${levelData.name}!`,
             enemyName: enemyName,
-            isBossBattle: isBossBattle
+            isBossBattle: isBossBattle,
+            bossName: isBossBattle ? levelData.bossName : undefined
         });
 
     } catch (error) {
@@ -341,5 +353,107 @@ exports.fleeFromBattle = async (req, res) => {
         res.status(200).json({ message: "Has huido del combate." });
     } catch (error) {
         res.status(500).json({ message: "Error al huir del combate", error: error.message });
+    }
+};
+
+exports.catchPokemon = async (req, res) => {
+    try {
+        const { battleId } = req.body;
+
+        const battle = await Battle.findById(battleId);
+        if (!battle) return res.status(404).json({ message: "Combate no encontrado" });
+        if (battle.status !== 'ongoing') return res.status(400).json({ message: "El combate ya ha terminado" });
+        if (battle.isBossBattle) return res.status(400).json({ message: "¡No puedes capturar al Pokémon de un líder de gimnasio!" });
+
+        // Cuanto menos HP tiene el enemigo, más probabilidad de captura (10% mín - 90% máx)
+        const hpRatio = battle.enemyPokemon.currentHp / battle.enemyPokemon.maxHp;
+        const catchChance = (1 - hpRatio) * 0.8 + 0.1;
+        const caught = Math.random() < catchChance;
+
+        if (caught) {
+            const user = await User.findById(battle.userId);
+            if (!user) return res.status(404).json({ message: "Entrenador no encontrado" });
+
+            const pokemonName = battle.enemyPokemon.name;
+            battle.status = 'won';
+            await battle.save();
+
+            // Si el equipo está lleno, el Pokémon va al PC de Bill
+            if ((user.pokemonTeam || []).length >= 6) {
+                if (!(user.pokemonBox || []).includes(pokemonName)) {
+                    await User.findByIdAndUpdate(
+                        battle.userId,
+                        { $addToSet: { pokemonBox: pokemonName } }
+                    );
+                }
+                const refreshed = await User.findById(battle.userId);
+                return res.status(200).json({
+                    caught: true,
+                    sentToBox: true,
+                    pokemon: pokemonName,
+                    pokemonBox: refreshed.pokemonBox || [],
+                    message: `¡${pokemonName.toUpperCase()} capturado! Tu equipo está lleno, así que ha sido enviado al PC de Bill.`
+                });
+            }
+
+            // Equipo con hueco: va al equipo directamente
+            await User.findByIdAndUpdate(
+                battle.userId,
+                { $addToSet: { pokemonTeam: pokemonName } }
+            );
+            const refreshedUser = await User.findById(battle.userId);
+
+            return res.status(200).json({
+                caught: true,
+                sentToBox: false,
+                pokemon: pokemonName,
+                pokemonTeam: refreshedUser.pokemonTeam || [],
+                message: `¡${pokemonName.toUpperCase()} ha sido capturado y se ha unido a tu equipo!`
+            });
+        }
+
+        // Fallo: el enemigo ataca como penalización por el turno perdido
+        const [defenderRes, attackerRes] = await Promise.all([
+            fetch(`https://pokeapi.co/api/v2/pokemon/${battle.playerPokemon.name}`),
+            fetch(`https://pokeapi.co/api/v2/pokemon/${battle.enemyPokemon.name}`)
+        ]);
+        const defender = await defenderRes.json();
+        const attacker = await attackerRes.json();
+
+        const enemyAtk = attacker.stats.find(s => s.stat.name === 'attack').base_stat;
+        const playerDef = defender.stats.find(s => s.stat.name === 'defense').base_stat;
+        const enemyDamage = Math.floor((((22) * 40 * (enemyAtk / playerDef)) / 50) + 2);
+
+        battle.playerPokemon.currentHp = Math.max(0, battle.playerPokemon.currentHp - enemyDamage);
+
+        const teamEntry = battle.teamState.find(p => p.name === battle.playerPokemon.name);
+        if (teamEntry) teamEntry.currentHp = battle.playerPokemon.currentHp;
+        battle.markModified('teamState');
+
+        let needsSwitch = false;
+        if (battle.playerPokemon.currentHp === 0) {
+            const hasSurvivor = battle.teamState.some(p => p.currentHp > 0);
+            if (hasSurvivor) needsSwitch = true;
+            else battle.status = 'lost';
+        }
+
+        battle.turn += 1;
+        await battle.save();
+
+        return res.status(200).json({
+            caught: false,
+            message: `¡${battle.enemyPokemon.name.toUpperCase()} rompió la Pokéball! Contraataca con ${enemyDamage} de daño.`,
+            estadoCombate: {
+                estado: battle.status,
+                needsSwitch,
+                vidaJugador: `${battle.playerPokemon.currentHp} / ${battle.playerPokemon.maxHp}`,
+                vidaEnemigo: `${battle.enemyPokemon.currentHp} / ${battle.enemyPokemon.maxHp}`,
+                pokemonActual: battle.playerPokemon.name,
+                teamState: battle.teamState
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: "Error al intentar capturar", error: error.message });
     }
 };
